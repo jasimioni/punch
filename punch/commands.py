@@ -296,7 +296,7 @@ def handle_login(args, config, console):
         console.print(f"[red]{e}[/red]")
         sys.exit(1)
 
-def show_timecards_table(timecards):
+def show_timecards_table(timecards, title="Timecards for submission"):
     """
     Display the timecards in a table format using rich.
     """
@@ -304,7 +304,7 @@ def show_timecards_table(timecards):
     from rich.console import Console
     
     console = Console()
-    table = Table(title="Timecards for submission", show_footer=True)
+    table = Table(title=title, show_footer=True)
 
     table.add_column("Case no.", justify="center", style="cyan")
     table.add_column("Task", justify="left", style="magenta", max_width=50, no_wrap=True)
