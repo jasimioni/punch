@@ -1,32 +1,31 @@
-#!/usr/bin/env python3
-
 import yaml
 import os
 from datetime import datetime, timedelta
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, Container, VerticalScroll
-from textual.widgets import Header, Footer, Static, Label, Input, Button, RadioSet, RadioButton, ListView, ListItem
+from textual.widgets import Header, Footer, Static, Label, Input, Button, ListView, ListItem
 from textual.screen import ModalScreen
 from textual.binding import Binding
 from textual.reactive import reactive
 from textual.message import Message
 
-# --- CONSTANTS ---
 TASKS_FILE = os.path.expanduser("~/.local/share/punch/tasks.txt")
 CATEGORIES_FILE = os.path.expanduser("~/.config/punch/punch.yaml")
+DEFAULT_CATEGORIES = {"General": {"short": "gen"}}
 DEFAULT_START_TIME = "08:30"
 
 # --- Helper: Load Categories ---
-def load_categories():
-    default_cats = {"General": {"short": "gen"}}
-    if not os.path.exists(CATEGORIES_FILE):
-        return default_cats
+
+def parse_config(config_file):
+    if not os.path.exists(config_file):
+        return {}
     try:
-        with open(CATEGORIES_FILE, 'r') as f:
+        with open(config_file, 'r') as f:
             data = yaml.safe_load(f)
-            return data.get('categories', default_cats)
+            return data
     except:
-        return default_cats
+        return {}
+
 
 # --- Helper: Get Sunday ---
 def get_current_week_sunday():
@@ -34,8 +33,14 @@ def get_current_week_sunday():
     idx = (today.isoweekday() % 7) 
     return today - timedelta(days=idx)
 
-# --- CUSTOM LIST ITEM ---
+# --- CUSTOM LIST ITEM (For Suggestions) ---
 class SuggestionListItem(ListItem):
+    def __init__(self, text: str):
+        super().__init__(Label(text))
+        self.text_value = text
+
+# --- CUSTOM LIST ITEM (For Categories) ---
+class CategoryListItem(ListItem):
     def __init__(self, text: str):
         super().__init__(Label(text))
         self.text_value = text
@@ -69,9 +74,8 @@ class TimeEntryModal(ModalScreen):
     def compose(self) -> ComposeResult:
         with Container(id="modal-dialog"):
             yield Label("Select Category:", classes="section-label")
-            with RadioSet(id="category-radio"):
-                for cat_name in self.categories.keys():
-                    yield RadioButton(cat_name) 
+            with VerticalScroll(id="category-container"):
+                yield ListView(id="category-list")
             yield Label("Enter Minutes:", classes="section-label")
             yield Input(placeholder="e.g. 60", value=self.initial_time, type="integer", id="time-input")
             yield Label("Description:", classes="section-label")
@@ -84,22 +88,31 @@ class TimeEntryModal(ModalScreen):
                 yield Button("Cancel", variant="error", id="cancel-btn")
 
     def on_mount(self):
-        radio_set = self.query_one("#category-radio", RadioSet)
-        target_button = None
-        if self.initial_category:
-            for button in radio_set.children:
-                if str(button.label) == self.initial_category:
-                    target_button = button
-                    break
-        if not target_button and radio_set.children:
-            target_button = radio_set.children[0]
-        if target_button:
-            target_button.value = True
-            self.call_after_refresh(target_button.focus)
-            self.update_suggestions(str(target_button.label))
+        cat_list = self.query_one("#category-list", ListView)
+        target_index = 0
+        for idx, cat_name in enumerate(self.categories.keys()):
+            item = CategoryListItem(cat_name)
+            cat_list.mount(item)
+            if cat_name == self.initial_category:
+                target_index = idx
+        cat_list.index = target_index
+        self.call_after_refresh(cat_list.focus)
+        if self.categories:
+            initial_cat = list(self.categories.keys())[target_index]
+            self.update_suggestions(initial_cat)
 
-    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
-        self.update_suggestions(str(event.pressed.label))
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        if event.control.id == "category-list":
+            if isinstance(event.item, CategoryListItem):
+                self.update_suggestions(event.item.text_value)
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if event.control.id == "category-list":
+            self.query_one("#time-input").focus()
+        elif event.control.id == "suggestions-list":
+            if isinstance(event.item, SuggestionListItem):
+                self.query_one("#desc-input").value = event.item.text_value
+                self.query_one("#desc-input").focus()
 
     def update_suggestions(self, category: str):
         list_view = self.query_one("#suggestions-list", ListView)
@@ -111,13 +124,6 @@ class TimeEntryModal(ModalScreen):
             for desc in options:
                 list_view.mount(SuggestionListItem(desc))
 
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
-        if isinstance(event.item, SuggestionListItem):
-            text = event.item.text_value
-            desc_input = self.query_one("#desc-input", Input)
-            desc_input.value = text
-            desc_input.focus()
-
     def action_cancel(self): self.dismiss(None)
     def on_input_submitted(self, event: Input.Submitted) -> None: self._submit_form()
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -125,12 +131,12 @@ class TimeEntryModal(ModalScreen):
         else: self.dismiss(None)
 
     def _submit_form(self):
-        radio_set = self.query_one("#category-radio", RadioSet)
-        selected_button = radio_set.pressed_button
-        if not selected_button:
+        cat_list = self.query_one("#category-list", ListView)
+        if cat_list.index is None:
             self.notify("Please select a category.", severity="error")
             return
-        cat_name = str(selected_button.label)
+        selected_item = cat_list.children[cat_list.index]
+        cat_name = selected_item.text_value
         time_inp = self.query_one("#time-input", Input)
         desc_inp = self.query_one("#desc-input", Input)
         if time_inp.value.isdigit():
@@ -164,7 +170,7 @@ class TimeCard(Static):
         except: pass
 
     def _get_label_text(self):
-        text = f"[{self.category}]"
+        text = f"{self.category}"
         if self.description:
             text += f"\n{self.description}"
         text += f"\n{self.minutes}m"
@@ -192,14 +198,10 @@ class DayColumn(Vertical):
         self.update_total()
     
     def clear_entries(self):
-        """Removes all cards and resets totals."""
         container = self.query_one(".cards-container")
-        
         for child in container.children:
-            # FIX 1: Set minutes to 0 so sums are correct immediately
             child.minutes = 0
             child.remove()
-        
         self.total_minutes = 0
         self.query_one(".day-total-label", Label).update("0 min")
         self.post_message(self.StatsUpdated())
@@ -214,7 +216,7 @@ class DayColumn(Vertical):
         pass
 
 # --- Main Application ---
-class TimeSheetApp(App):
+class WeeklyViewApp(App):
     CSS = """
     Screen { align: center middle; }
     #week-grid { height: 100%; width: 100%; align: center top; }
@@ -224,10 +226,10 @@ class TimeSheetApp(App):
     .cards-container { height: 1fr; padding: 0 1; }
     TimeCard { height: auto; min-height: 3; margin-bottom: 0; background: $panel; border: solid $background; content-align: center middle; padding: 1; text-align: center; }
     TimeCard:focus { border: solid $success; background: $surface; }
-    #modal-dialog { grid-size: 2; grid-gutter: 1; grid-rows: auto auto auto auto 1fr auto; padding: 1 2; width: 60; height: 80%; border: thick $background 80%; background: $surface; }
+    #modal-dialog { grid-size: 2; grid-gutter: 1; grid-rows: auto auto auto auto 1fr auto; padding: 1 2; width: 60; height: 85%; border: thick $background 80%; background: $surface; }
     .section-label { width: 100%; margin-top: 1; text-style: bold; }
     .section-label-small { width: 100%; margin-top: 1; color: $text-muted; text-style: italic; }
-    #category-radio { height: auto; max-height: 8; overflow-y: auto; background: $surface-darken-1; padding: 1; margin-bottom: 1; }
+    #category-container { height: auto; max-height: 10; background: $surface-darken-1; border: solid $primary-background; margin-bottom: 1; }
     #suggestions-container { height: 1fr; background: $surface-darken-1; border: solid $primary-background; margin-bottom: 1; }
     #modal-buttons { align: center bottom; height: auto; margin-top: 1; }
     Button { margin: 1; }
@@ -250,18 +252,25 @@ class TimeSheetApp(App):
     categories = {}
     description_history = {} 
 
+    def __init__(self, tasks_file=TASKS_FILE, config_file=CATEGORIES_FILE):
+        super().__init__()
+        self.tasks_file = tasks_file
+        self.config_file = config_file
+
     def on_load(self):
-        self.categories = load_categories()
+        config = parse_config(self.config_file)
+        self.categories = config.get("categories", DEFAULT_CATEGORIES)
+        if not self.categories:
+            self.categories = DEFAULT_CATEGORIES
+        
+        self.start_time = config.get("start_time", DEFAULT_START_TIME)
 
     def compose(self) -> ComposeResult:
         yield Header()
-        
-        # Create columns ONCE
         columns = []
         for i in range(7):
             current_date = self.current_week_start + timedelta(days=i)
             columns.append(DayColumn(current_date, id=f"day-{i}"))
-
         yield Horizontal(*columns, id="week-grid")
         yield Footer()
 
@@ -278,14 +287,12 @@ class TimeSheetApp(App):
                 col.query_one(".date-label", Label).update(col.date_obj.strftime("%Y-%m-%d"))
             except:
                 pass 
-
         self.load_data()
-        # Trigger subtitle update manually on week change to ensure it syncs
         self.sub_title = f"Week of {new_start.strftime('%Y-%m-%d')} | Total: {self.total_week_minutes} mins"
 
     def load_data(self):
-        if not os.path.exists(TASKS_FILE): return
-        with open(TASKS_FILE, 'r') as f: lines = f.readlines()
+        if not os.path.exists(self.tasks_file): return
+        with open(self.tasks_file, 'r') as f: lines = f.readlines()
 
         data_by_date = {}
         self.description_history = {} 
@@ -327,8 +334,8 @@ class TimeSheetApp(App):
         for col in columns: visible_dates.add(col.date_obj.strftime("%Y-%m-%d"))
 
         preserved_lines = []
-        if os.path.exists(TASKS_FILE):
-            with open(TASKS_FILE, 'r') as f:
+        if os.path.exists(self.tasks_file):
+            with open(self.tasks_file, 'r') as f:
                 for line in f:
                     parts = line.split('|')
                     if parts:
@@ -344,26 +351,27 @@ class TimeSheetApp(App):
             new_lines.append(f"{current_time.strftime('%Y-%m-%d %H:%M')} | start")
             for card in cards:
                 current_time += timedelta(minutes=card.minutes)
-                line = f"{current_time.strftime('%Y-%m-%d %H:%M')} | {card.category}"
+                
+                line = f"{current_time.strftime('%Y-%m-%d %H:%M')} | {card.category} | "
                 if card.description:
-                    line += f" | {card.description}"
+                    line += f"{card.description}"
+
+                if card.description:
                     if card.category not in self.description_history: self.description_history[card.category] = set()
                     self.description_history[card.category].add(card.description)
                 new_lines.append(line)
 
         all_lines = preserved_lines + new_lines
         all_lines.sort()
-        os.makedirs(os.path.dirname(TASKS_FILE), exist_ok=True)
-        with open(TASKS_FILE, 'w') as f:
+        os.makedirs(os.path.dirname(self.tasks_file), exist_ok=True)
+        with open(self.tasks_file, 'w') as f:
             for line in all_lines: f.write(line + "\n")
 
     def on_day_column_stats_updated(self, message: DayColumn.StatsUpdated):
-        # Re-calculate grand total
         total = sum(col.total_minutes for col in self.query(DayColumn))
         self.total_week_minutes = total
 
     def watch_total_week_minutes(self, value: int):
-        # FIX 2: Actually update the UI when the total changes
         self.sub_title = f"Week of {self.current_week_start.strftime('%Y-%m-%d')} | Total: {value} mins"
 
     def action_handle_enter(self):
@@ -442,5 +450,5 @@ class TimeSheetApp(App):
             self.query_one(f"#day-{new_idx}").focus()
 
 if __name__ == "__main__":
-    app = TimeSheetApp()
+    app = WeeklyViewApp()
     app.run()
