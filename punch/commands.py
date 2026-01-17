@@ -350,6 +350,15 @@ def handle_submit(args, config, tasks_file, console):
         if not timecards or len(timecards) == 0:
             console.print("No timecards found for submission.", style="bold red")
             return
+        
+        
+        no_case_entries = [tc for tc in timecards if getattr(tc, "case_no") is None]
+
+        if no_case_entries:
+            show_timecards_table(no_case_entries, title="Entries with missing case numbers (won't be submitted)")
+        
+        timecards = [tc for tc in timecards if getattr(tc, "case_no") is not None]
+        
         show_timecards_table(timecards)
         
         suffix = DRY_RUN_SUFFIX if args.dry_run else ""

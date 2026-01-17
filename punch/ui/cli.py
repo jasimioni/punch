@@ -418,15 +418,15 @@ def help_cmd(
         typer.echo(target.get_help(subctx))
     raise typer.Exit()
 
-@app.command("weekly")
-def weekly(
+@app.command("weeklyeditor")
+def weeklyeditor(
     verbose: bool = typer.Option(False, "-v", "--verbose", help="Enable verbose output"),
 ):
     """
-    Show a weekly view of tasks.
+    Run the weekly editor of tasks.
     """
-    from punch.weekly import WeeklyViewApp
-    app = WeeklyViewApp(config_file=get_config_path(), tasks_file=get_tasks_file())
+    from punch.weeklyeditor import WeeklyEditorApp
+    app = WeeklyEditorApp(config_file=get_config_path(), tasks_file=get_tasks_file())
     app.run()
 
 @app.command("whats-new")

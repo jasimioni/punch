@@ -4,6 +4,7 @@ from pathlib import Path
 import time
 from playwright.sync_api import sync_playwright, Error as playwright_error
 from punch.tasks import read_tasklog
+import punch.commands
 import datetime
 from rich.progress import Progress, BarColumn, TextColumn, TimeElapsedColumn
 from rich.console import Console
@@ -160,13 +161,6 @@ def _convert_to_timecard(config, entry):
 
     start_time = entry.finish - datetime.timedelta(minutes=duration)
 
-    if not case_no:
-        console = Console()
-        console.print(
-            f"[cyan]Warning: No case mapping found for '{entry.category}' : '{task_name_visual}'. Entry ignored.[/cyan]"
-        )
-        return None
-
     return TimecardEntry(
         case_no, 
         full_name, 
@@ -185,7 +179,8 @@ def get_timecards(config, file_path="tasks.txt", date_from=None, date_to=None):
     entries = _get_valid_entries(file_path, date_from, date_to)
     if not entries:
         return []
-    return [tc for tc in (_convert_to_timecard(config, entry) for entry in entries) if tc is not None]
+    
+    return [_convert_to_timecard(config, entry) for entry in entries]
 
 def submit_timecards(config, timecards, headless=True, interactive=False, dry_run=False, verbose=False, sleep=0.0):
     """

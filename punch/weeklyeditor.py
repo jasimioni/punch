@@ -216,7 +216,7 @@ class DayColumn(Vertical):
         pass
 
 # --- Main Application ---
-class WeeklyViewApp(App):
+class WeeklyEditorApp(App):
     CSS = """
     Screen { align: center middle; }
     #week-grid { height: 100%; width: 100%; align: center top; }
@@ -450,5 +450,5 @@ class WeeklyViewApp(App):
             self.query_one(f"#day-{new_idx}").focus()
 
 if __name__ == "__main__":
-    app = WeeklyViewApp()
+    app = WeeklyEditorApp()
     app.run()
